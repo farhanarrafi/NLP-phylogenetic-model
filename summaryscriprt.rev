@@ -1,0 +1,8 @@
+tt = readTreeTrace("output/assignmentModel.t")
+tt.summarize()
+
+mcc = mccTree(tt, file = "output/assignmentModel.mcc.tre")
+ct = consensusTree(tt, file = "output/assignmentModel.con.tre")
+map = mapTree(tt, file = "output/assignmentModel.map.tre")
+
+quit()

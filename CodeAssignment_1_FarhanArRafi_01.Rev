@@ -1,0 +1,123 @@
+chars = readDiscreteCharacterData("../data/assignmentdata.nex")
+# [ FRENCH, ITALIAN, JUDEO_ESPAGNOL, LATIN, PORTUGUESE, SPANISH ]
+taxa = chars.taxa() 
+
+n_taxa <- taxa.size()
+
+moves = VectorMoves()
+
+# Theoretically, the root can be infinitely old, 
+# so we have to set priors. Proto-Germanic is 
+# commonly assumed to have occurred between 1,000 BC 
+# and 200 AD with the most likely date being between 
+# 500 BC and 1 AD.
+# We can set the root prior like this:
+
+
+origin_time ~ dnNormal(mean=2.25,sd=0.2,min=1.8,max=3)
+origin_time.setValue(2.25)
+moves.append( mvSlide(origin_time, delta=0.1,   weight=1.0, tune=TRUE) )
+
+speciation_rate ~ dnLognormal(-7, 10)
+speciation_rate.setValue(0.1)
+moves.append( mvScale(speciation_rate, lambda=0.1,    weight=1, tune=TRUE) )
+
+extinction_rate ~ dnLognormal(-7, 10)
+moves.append( mvScale(extinction_rate, lambda=0.1,    weight=1, tune=TRUE) )
+
+
+# Molecular dating
+# The tree model is a Birth-Death Process which incorporates a 
+# process that estimates the rate at which new lineages are 
+# created and the rate at which they die out.
+tree = dnBDP(rootAge=origin_time,
+                lambda=speciation_rate,
+                mu=extinction_rate,
+                taxa=taxa)
+
+
+clade_0 = clade("SPANISH", "JUDEO_ESPAGNOL", "ITALIAN")
+clade_1 = clade("PORTUGUESE", "FRENCH")
+
+constraints = v(clade_0, clade_1)
+
+timetree ~ dnConstrainedTopology(tree, constraints=constraints)
+
+
+# We assume that Judeo-Espagnol and Spanish split 
+# somewhere between 1500 AD and today.
+cladeage0 := tmrca(timetree, clade_0)
+F_clade0 ~ dnSoftBoundUniformNormal(min=cladeage0 - 1.5, max=cladeage0 - 0, sd=0.001, p=0.95)
+F_clade0.clamp( 0 )
+
+# To set branch rates of LATIN to 0, we can modify the branch rate calculation 
+# like this:
+
+
+n_branches <- 2 * n_taxa - 2
+for (j in 1:n_branches) {
+    if ( j == timetree.tipIndex("LATIN") ){
+        branch_rates[j] <- 0
+    }else {
+        branch_rates[j] ~ dnGamma(2.0,4.0)
+        moves.append( mvScale(branch_rates[j], lambda=0.1,  weight=1.0, tune=TRUE) )
+    }
+}
+
+moves.append( mvNodeTimeSlideUniform(timetree, weight=50.0) )
+moves.append( mvNNI(timetree, weight=100))
+moves.append( mvNarrow(timetree, weight=100))
+moves.append( mvFNPR(timetree, weight=100) )
+moves.append( mvRootTimeSlideUniform(timetree, origin_time, weight=50.0) )
+moves.append( mvFossilTimeSlideUniform(timetree, origin_time, weight=50.0) )
+
+
+# This means the rate at which characters change from one state 
+# to another. Here, we set it globally (i.e., throughout the 
+# diversification, the change rate remains constant for all 
+# lineages).
+
+alpha ~ dnExp(1)
+moves.append(mvScale(alpha, lambda=0.1, tune=TRUE))
+gamma_rates := fnDiscretizeGamma(alpha, alpha, 4)
+
+# We define the rate matrix Q for our substitution model with 
+# a Dirichlet (3,3) prior
+rm <- rep(3, 2)
+ratematrix ~ dnDirichlet( rm )
+moves.append( mvDirichletSimplex(ratematrix, kappa=0.1,  weight=1.0, tune=TRUE) )
+Q:= fnFreeBinary(ratematrix)
+
+
+
+seq ~ dnPhyloCTMC(tree=timetree,
+                  Q=Q,
+                  branchRates=branch_rates,
+                  siteRates=gamma_rates,
+                  type="Standard",
+                  treatAmbiguousAsGap=TRUE,
+                  coding="all")
+seq.clamp(chars)
+
+
+mymodel = model(seq)
+
+monitors = VectorMonitors()
+
+thinning = 100
+monitors.append(mnModel(filename="output/model.p", printgen=thinning))
+
+monitors.append(mnFile(filename="output/model.t", printgen=thinning, timetree))
+
+monitors.append(mnScreen(printgen=thinning))
+
+monitors.append(mnStochasticVariable(filename="output/model.var", printgen=thinning))
+
+#mymcmc = mcmcmc(mymodel, monitors, moves, nruns=2, nchains=2)
+mymcmc = mcmc(mymodel, monitors, moves, nruns=2, combine="mixed")
+
+mymcmc.burnin(10000, tuningInterval=100)
+mymcmc.run(generations=50000, tuningInterval=100)
+
+
+quit()

@@ -1,0 +1,29 @@
+n_branches <- 2 * n_taxa - 2
+for (j in 1:n_branches) {
+    if ( j == tree.tipIndex("LATIN") ){
+        branch_rates[j] <- 0
+    }else {
+        branch_rates[j] ~ dnGamma(2.0,4.0)
+        moves.append( mvScale(branch_rates[j], lambda=0.1,  weight=1.0, tune=TRUE) )
+    }
+}
+
+
+fossils = tree.getFossils()
+for (i in 1:fossils.size()) {
+  t[i] := tmrca(tree, clade(fossils[i]))
+  a_i = fossils[i].getMinAge()
+  b_i = fossils[i].getMaxAge()
+  F[i] ~ dnUniform(t[i] - b_i, t[i] - a_i)
+  F[i].clamp( 0 )
+}     
+
+
+clock_rate ~ dnGamma(2.0,4.0)
+moves.append( mvScale(clock_rate,lambda=0.5,tune=true,weight=5.0) )
+
+
+cladeage2 := tmrca(timetree, clade_2)
+LAT := tmrca(timetree, clade("LATIN"))
+F_clade2 ~ dnSoftBoundUniformNormal(min=cladeage2 - (LAT + 0.01), max=cladeage2 - LAT, sd=0.001, p=0.95)
+F_clade2.clamp( 0 )
